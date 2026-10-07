@@ -1,27 +1,26 @@
-import requests
-from app.core.config import settings
+from app.graph.agent import grafo
 
-token = settings.TMDB_API_KEY.strip()
-base_url = settings.TMDB_BASE_URL.rstrip("/")
-url = f"{base_url}/discover/movie"
+casos_de_prueba = [
+    "Recomiéndame películas de Leonardo DiCaprio",
+    "Quiero ver algo de Terror para esta noche",
+    "He tenido un día horrible en el trabajo y necesito desconectar y motivarme",
+]
 
-headers = {
-    "accept": "application/json",
-    "Authorization": f"Bearer {token}"
-}
+for i, mensaje in enumerate(casos_de_prueba):
+    print("\n" + "=" * 50)
+    print(f"PROBANDO: '{mensaje}'")
+    print("=" * 50)
 
-params = {
-    "language": "es-ES",
-    "page": 1
-}
+    config = {"configurable": {"thread_id": f"test-{i}"}}
+    estado_final = grafo.invoke({"mensaje_usuario": mensaje}, config=config)
 
-print("--- DIAGNÓSTICO ---")
-print(f"URL: {url}")
-print(f"Longitud del token: {len(token)}")
-print(f"Primeros 10 caracteres del token: {token[:10]}...")
-print("Enviando petición...")
+    print(f"-> Intención detectada: {estado_final.get('tipo_intencion')}")
+    if estado_final.get("termino_busqueda"):
+        print(f"-> Término extraído: {estado_final['termino_busqueda']}")
+    if estado_final.get("mood_detectado"):
+        print(f"-> Mood: {estado_final['mood_detectado']}")
+        print(f"-> Keywords: {estado_final.get('keywords', [])}")
 
-res = requests.get(url, headers=headers, params=params)
-
-print(f"Código HTTP: {res.status_code}")
-print(f"Respuesta TMDB: {res.text}")
+    print("\n[RESPUESTA FINAL]:")
+    respuesta = estado_final.get("respuesta_final") or "(sin respuesta)"
+    print(respuesta[:300] + "...\n")

@@ -1,124 +1,176 @@
-from typing import Literal
-from pydantic import BaseModel, Field
+import uuid
+
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_ollama import ChatOllama
-from langgraph.graph import StateGraph, MessagesState, START, END
-from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
-from app.graph.state import PlanMusical, SpotifyState
-from app.graph.tools import sp
+from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import ToolNode
 
-from .tools import buscar_canciones, analizar_metricas_audio, crear_playlist_en_cuenta
-
+from app.graph.state import AnalisisEmocional, ClasificacionIntencion, EstadoRecomendador
+from app.graph.tools import SIN_RESULTADOS, buscar_peliculas
 
 llm = ChatOllama(model="qwen2.5:3b", temperature=0)
-planner_llm = llm.with_structured_output(PlanMusical)
+llm_router = llm.with_structured_output(ClasificacionIntencion)
+llm_psicologo = llm.with_structured_output(AnalisisEmocional)
 
-def nodo_planner(state: SpotifyState):
-    """Único nodo que usa el LLM: extrae los parámetros de la petición del usuario."""
-    prompt = SystemMessage(content=(
-        "Analiza la petición musical del usuario y genera los parámetros para la búsqueda. "
-        "Define el mejor término de búsqueda, un nombre atractivo para la playlist y el criterio de ordenación."
-    ))
-    plan: PlanMusical = planner_llm.invoke([prompt] + state["messages"])
-    
+
+# 1. NODO ENRUTADOR: Clasifica y extrae entidades
+def nodo_router(state: EstadoRecomendador) -> dict:
+    mensaje = state["mensaje_usuario"]
+    prompt = f"""
+    Analiza este mensaje y determina si el usuario busca por un actor en particular,
+    por un género cinematográfico concreto, o si expresa un estado de ánimo/tema libre (mood).
+    Si es actor o género, extrae el nombre en el campo entidad.
+
+    Mensaje: {mensaje}
+    """
+    clasificacion: ClasificacionIntencion = llm_router.invoke(prompt)
+    entidad = (clasificacion.entidad or "").strip() or None
     return {
-        "termino_busqueda": plan.termino_busqueda,
-        "nombre_playlist": plan.nombre_playlist,
-        "criterio_orden": plan.criterio_orden,
-        "messages": [AIMessage(content=f"Planificado: buscar '{plan.termino_busqueda}' para la playlist '{plan.nombre_playlist}'.")]
+        "tipo_intencion": clasificacion.tipo,
+        "termino_busqueda": entidad,
+        "keywords": [],
+        "messages": [HumanMessage(content=mensaje)],
     }
 
 
-def nodo_scout(state: SpotifyState):
-    """Python puro (0.1s): busca las canciones en Spotify evitando sobrecarga."""
-    query = state.get("termino_busqueda", "rock")
-    res = sp.search(q=query, type="track", limit=5)
-    
-    canciones = []
-    for item in res.get("tracks", {}).get("items", []):
-        canciones.append({
-            "id": item.get("id"),
-            "nombre": item.get("name"),
-            "artista": item.get("artists", [{}])[0].get("name"),
-            "popularidad": item.get("popularity"),
-            "duracion_ms": item.get("duration_ms")
-        })
-    
-    return {"canciones_seleccionadas": canciones}
+# 2. NODO ANALIZADOR DEL ESTADO DE ÁNIMO DEL USUARIO
+def nodo_analizar_mood(state: EstadoRecomendador) -> dict:
+    mensaje = state["mensaje_usuario"]
+    prompt = f"""
+    Eres un psicólogo experto en cine. Analiza el siguiente texto y deduce el estado
+    de ánimo o energía del usuario. Devuelve un resumen corto y entre 3 y 5 palabras
+    clave temáticas (conceptos, valores, subgéneros) para buscar en el catálogo.
+
+    Mensaje: {mensaje}
+    """
+    analisis: AnalisisEmocional = llm_psicologo.invoke(prompt)
+    keywords = [k.strip() for k in (analisis.keywords or []) if k and k.strip()][:5]
+    return {
+        "mood_detectado": analisis.mood_detectado,
+        "keywords": keywords,
+    }
 
 
-def nodo_dj(state: SpotifyState):
-    """Python puro (0.001s): ordena las canciones sin gastar inferencias ni sufrir error 403."""
-    canciones = state.get("canciones_seleccionadas", [])
-    criterio = state.get("criterio_orden", "popularidad")
-    
-    # Ordenación determinista instantánea
-    if criterio == "duracion":
-        canciones_ordenadas = sorted(canciones, key=lambda x: x["duracion_ms"])
+# NODO 3: Prepara la llamada a la tool (no ejecuta SQL aquí, lo hace el ToolNode)
+def nodo_preparar_busqueda(state: EstadoRecomendador) -> dict:
+    tipo = state.get("tipo_intencion")
+    termino = (state.get("termino_busqueda") or "").strip() or None
+    keywords = state.get("keywords") or []
+
+    args: dict = {}
+    if tipo == "actor" and termino:
+        args = {"actor": termino}
+    elif tipo == "genero" and termino:
+        args = {"genero": termino}
+    elif tipo == "mood" and keywords:
+        args = {"keywords": keywords}
     else:
-        canciones_ordenadas = sorted(canciones, key=lambda x: x["popularidad"], reverse=True)
-    
-    track_ids = [c["id"] for c in canciones_ordenadas]
-    
-    resumen = "\n".join([f"- {c['nombre']} ({c['artista']})" for c in canciones_ordenadas])
-    mensaje_dj = (
-        f"He preparado la selección para '{state['nombre_playlist']}':\n{resumen}\n\n"
-        "Todo está listo para guardarse en tu Spotify."
+        # Sin criterios válidos: llamada vacía para que la tool devuelva SIN_RESULTADOS
+        args = {}
+
+    return {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": buscar_peliculas.name,
+                        "args": args,
+                        "id": f"buscar-{uuid.uuid4().hex[:8]}",
+                    }
+                ],
+            )
+        ]
+    }
+
+
+def nodo_pedir_aclaracion(state: EstadoRecomendador) -> dict:
+    respuesta = (
+        "No he entendido si buscas por actor, género o estado de ánimo. "
+        "Dime por ejemplo: 'películas de Tom Hanks', 'quiero comedia' o 'necesito desconectar'."
     )
-    
-    return {
-        "canciones_seleccionadas": canciones_ordenadas,
-        "track_ids": track_ids,
-        "messages": [AIMessage(content=mensaje_dj)]
-    }
+    return {"respuesta_final": respuesta}
 
 
-def nodo_gestor(state: SpotifyState):
-    """Python puro (0.2s): crea la playlist real. Este es el nodo protegido por HITL."""
-    nombre = state.get("nombre_playlist", "Mi Playlist de IA")
-    track_ids = state.get("track_ids", [])
-    
-    user_id = sp.me()["id"]
-    playlist = sp.user_playlist_create(user=user_id, name=nombre, public=True)
-    
-    uris = [f"spotify:track:{t_id}" for t_id in track_ids]
-    if uris:
-        sp.playlist_add_items(playlist_id=playlist["id"], items=uris)
-        
-    return {
-        "messages": [AIMessage(content=f"¡Éxito! Playlist '{nombre}' creada con {len(track_ids)} canciones.")]
-    }
+# NODO 4: Redactor (Genera la respuesta final en Markdown)
+def nodo_redactar(state: EstadoRecomendador) -> dict:
+    peliculas = SIN_RESULTADOS
+    for msg in reversed(state.get("messages", [])):
+        if isinstance(msg, ToolMessage):
+            peliculas = msg.content
+            break
+    if not peliculas:
+        peliculas = state.get("peliculas_encontradas") or SIN_RESULTADOS
+
+    tipo = state.get("tipo_intencion")
+    mood = state.get("mood_detectado")
+
+    contexto = f"El usuario se siente: {mood}." if mood else f"El usuario buscó por: {tipo}."
+    sin_resultados = peliculas == SIN_RESULTADOS
+
+    prompt = f"""
+    Eres un recomendador de cine amable y servicial.
+    {contexto}
+
+    Aquí tienes las películas encontradas en nuestro catálogo:
+    {peliculas}
+
+    Redacta una respuesta cercana presentándole las películas de forma atractiva.
+    Conserva siempre el título, la puntuación y las URLs de los carteles si están disponibles.
+    {"IMPORTANTE: no hay resultados. Dilo con honestidad y sugiere 2-3 búsquedas alternativas. No inventes películas." if sin_resultados else ""}
+    """
+    respuesta = llm.invoke(prompt)
+    return {"peliculas_encontradas": peliculas, "respuesta_final": respuesta.content}
 
 
-# --- 4. CONSTRUCCIÓN DEL GRAFO ---
-workflow = StateGraph(SpotifyState)
+def bifurcar_segun_intencion(state: EstadoRecomendador) -> str:
+    tipo = state.get("tipo_intencion")
+    # Si es mood, pasa primero por el psicólogo. Si no, prepara la búsqueda.
+    if tipo == "mood":
+        return "analizar_mood"
+    if tipo in ("actor", "genero"):
+        return "preparar_busqueda"
+    return "pedir_aclaracion"
 
-workflow.add_node("planner", nodo_planner)
-workflow.add_node("scout", nodo_scout)
-workflow.add_node("dj", nodo_dj)
-workflow.add_node("gestor", nodo_gestor)
 
-# Flujo secuencial instantáneo
-# 1. Inicio hacia el planificador (único paso LLM)
-workflow.add_edge(START, "planner")
+# ========================================================
+# CONSTRUCCIÓN DEL GRAFO
+# ========================================================
+tool_node = ToolNode([buscar_peliculas])
 
-# 2. Paso directo: Planner -> Scout (búsqueda en Spotify)
-workflow.add_edge("planner", "scout")
+workflow = StateGraph(EstadoRecomendador)
 
-# 3. Paso directo: Scout -> DJ (ordenación por Python)
-workflow.add_edge("scout", "dj")
+workflow.add_node("router", nodo_router)
+workflow.add_node("analizar_mood", nodo_analizar_mood)
+workflow.add_node("preparar_busqueda", nodo_preparar_busqueda)
+workflow.add_node("tools", tool_node)
+workflow.add_node("redactar", nodo_redactar)
+workflow.add_node("pedir_aclaracion", nodo_pedir_aclaracion)
 
-# 4. Paso hacia el Gestor (aquí actúa interrupt_before=["gestor"])
-workflow.add_edge("dj", "gestor")
+workflow.add_edge(START, "router")
 
-# 5. Fin del flujo tras crear la playlist
-workflow.add_edge("gestor", END)
-
-checkpointer = MemorySaver()
-
-# Freno HITL: Se detiene exactamente antes de tocar la cuenta del usuario en 'gestor'
-graph = workflow.compile(
-    checkpointer=checkpointer,
-    interrupt_before=["gestor"]
+workflow.add_conditional_edges(
+    "router",
+    bifurcar_segun_intencion,
+    {
+        "analizar_mood": "analizar_mood",
+        "preparar_busqueda": "preparar_busqueda",
+        "pedir_aclaracion": "pedir_aclaracion",
+    },
 )
+
+# El nodo de mood siempre continúa hacia la preparación de la búsqueda
+workflow.add_edge("analizar_mood", "preparar_busqueda")
+
+# La búsqueda pasa por el ToolNode real y luego al redactor
+workflow.add_edge("preparar_busqueda", "tools")
+workflow.add_edge("tools", "redactar")
+
+workflow.add_edge("redactar", END)
+workflow.add_edge("pedir_aclaracion", END)
+
+memory = MemorySaver()
+grafo = workflow.compile(checkpointer=memory)
+# Alias para compatibilidad con imports antiguos
+graph = grafo
