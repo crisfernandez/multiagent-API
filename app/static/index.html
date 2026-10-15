@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>REEL80 · Videoclub Neón</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=VT323&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="grid-bg" aria-hidden="true"></div>
+
+  <header class="hero">
+    <h1 class="logo">REEL<span>80</span></h1>
+    <p class="subtitle">Videoclub neón · recomendaciones en VHS</p>
+  </header>
+
+  <main class="container">
+    <form id="search-form" class="search">
+      <input
+        id="query"
+        type="text"
+        placeholder="Escribe qué quieres ver: 'Tom Hanks', 'Terror', 'Inception'... o cuéntame cómo te sientes"
+        autocomplete="off"
+      />
+      <button type="submit">BUSCAR</button>
+    </form>
+
+    <div class="toolbar">
+      <button id="refresh" type="button" hidden>&#8635; OTRAS 10</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <p id="narracion" class="narracion" hidden></p>
+
+    <section id="results" class="grid" aria-live="polite"></section>
+  </main>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <button id="close-modal" type="button" aria-label="Cerrar">&#10005;</button>
+      <div class="modal-poster">
+        <img id="m-poster" alt="" />
+      </div>
+      <div class="modal-info">
+        <h2 id="m-title"></h2>
+        <p id="m-tagline" class="tagline"></p>
+        <div class="meta-row" id="m-meta"></div>
+        <div class="chips" id="m-genres"></div>
+        <p id="m-synopsis" class="synopsis"></p>
+        <dl class="details">
+          <dt>Director</dt><dd id="m-director"></dd>
+          <dt>Reparto</dt><dd id="m-cast"></dd>
+          <dt>Año</dt><dd id="m-year"></dd>
+          <dt>Duración</dt><dd id="m-runtime"></dd>
+          <dt>Plataformas</dt><dd id="m-platforms"></dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
