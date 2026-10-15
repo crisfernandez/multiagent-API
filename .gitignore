@@ -4,4 +4,5 @@ __pycache__/
 cine.db
 .vscode
 .cache
-.env.example
+MEMORY.md
+*.log
