@@ -1,4 +1,3 @@
-import sqlalchemy
 from sqlalchemy import Column, Float, Integer, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.core.config import settings
@@ -25,10 +24,6 @@ class PeliculaDB(Base):
     keywords = Column(Text)  # Palabras clave de TMDB
     puntuacion = Column(Float)
     poster_path = Column(String(255), nullable=True)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    director = Column(String(255), nullable=True)  # Nombre del director/a
+    anio = Column(Integer, nullable=True)  # Año de estreno
+    plataformas = Column(String(255), nullable=True)  # Plataformas de streaming (ES)
