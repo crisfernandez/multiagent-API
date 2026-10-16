@@ -1,8 +1,7 @@
 # REEL80 · Videoclub Neón
 
-Recomendador de cine con **sistema multiagente** construido con [LangGraph](https://langchain-ai.github.io/langgraph/), FastAPI y un LLM local (Ollama). Escribe *"películas de Tom Hanks"*, *"algo de terror"* o *"necesito desconectar"* y el grafo decide cómo buscarte algo que encaje con tu catálogo.
+Recomendador de cine con **sistema multiagente** construido con [LangGraph](https://langchain-ai.github.io/langgraph/), FastAPI y un LLM local (Ollama).
 
-Interfaz de videoclub ochentero (neón + VHS): 10 tarjetas por pantalla, botón **OTRAS 10** y ficha ampliada con director, reparto, duración y plataformas en España.
 
 ---
 
@@ -65,11 +64,6 @@ La parte interesante está en lo que ocurre cuando algo falla: rutas condicional
             END ◄────────────────────────┘
 ```
 
-Dos detalles de diseño:
-
-- **`reintentar_catalogo` no usa LLM**: aplica una heurística directa sobre el catálogo (títulos, actores y géneros reales) para corregir rutas mal clasificadas, p. ej. que *"películas con Tom Hanks"* acabe clasificado como género.
-- **El estado se resetea en cada búsqueda** (`nodo_router`): con `MemorySaver` el hilo recuerda la sesión anterior, así que hay que limpiar `ya_reintentado`, `respaldo_mood` y `peliculas` para no arrastrar resultados viejos.
-
 ---
 
 ## Estructura del proyecto
@@ -93,8 +87,6 @@ API_Grafos/
 ├── requirements.txt
 └── .env.example
 ```
-
-**La API no consulta la BD directamente**: lo que se pinta en pantalla sale del `estado["peliculas"]` que produce el ToolNode del grafo. La API solo lo invoca y pagina.
 
 ---
 
@@ -122,8 +114,6 @@ python -m uvicorn app.api:app --port 8010
 # abre http://localhost:8010
 ```
 
-> El puerto 8000 suele estar ocupado; se usa **8010** a propósito.
-
 Prueba manual del grafo sin API (imprime la intención detectada y la respuesta del redactor):
 
 ```bash
@@ -150,35 +140,6 @@ Las peticiones **tardan** (~2-3 min la primera vez). No es un descuido: el grafo
 | `GET` | `/` | Frontend. |
 | `GET` | `/static/*` | CSS y JS del frontend. |
 
-### `POST /recomendar`
-
-```json
-{ "mensaje": "quiero ver algo que me ayude a desconectar",
-  "thread_id": "web-a1b2c3d4",
-  "excluir_ids": [11, 57, 203] }
-```
-
-- `thread_id`: identifica la sesión (memoria del grafo).
-- `excluir_ids`: películas ya mostradas; así *OTRAS 10* pagina sin repetir ni volver a llamar al LLM.
-
-Respuesta:
-
-```json
-{
-  "respuesta": "¿Cansado del día? Aquí van tres joyas para desconectar...",
-  "intencion": { "tipo_intencion": "mood", "termino_busqueda": null,
-                 "keywords": ["escape", "journey"], "mood_detectado": "..." },
-  "respaldo_mood": false,
-  "peliculas": [ { "id": 1, "titulo": "...", "poster": "https://...",
-                   "nota": 8.4, "director": "...", "anio": 2010, ... } ]
-}
-```
-
-### Paginación 60 → 10
-
-El grafo devuelve un **pool de 60 candidatos**; la API pinta 10 y, con *OTRAS 10*, reenvía los `excluir_ids` para traer la siguiente tanda **sin invocar de nuevo al LLM**.
-
----
 
 ## Licencia / datos
 
