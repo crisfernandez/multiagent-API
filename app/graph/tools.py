@@ -127,8 +127,21 @@ def buscar_peliculas(
     limite: int = 60,
 ) -> str:
     """
-    Busca películas en el catálogo por actor, género(s), título o palabras clave
-    temáticas. Devuelve un JSON con la forma
+    Busca en el catálogo interno de cine. Úsala SIEMPRE que necesites datos reales
+    del catálogo (títulos, puntuaciones, carteles, reparto, plataformas) para
+    responder al usuario; NO la uses para conversación general ni para pedir
+    aclaraciones.
+
+    Criterios (combinables entre sí; si no pasas ninguno devuelve el catálogo
+    ordenado por puntuación):
+    - actor: nombre de un intérprete (ej: "Tom Hanks"). También casa con títulos parecidos.
+    - genero: un género en español (ej: "Comedia").
+    - generos: lista de géneros en español para estados de ánimo (ej: ["Drama", "Thriller"]).
+    - titulo: título concreto (ej: "Origen").
+    - keywords: palabras clave en inglés del catálogo (ej: ["friendship", "revenge"]).
+    - limite: nº máximo de películas a devolver (usa 60 para dejar margen de paginación).
+
+    Devuelve un JSON con la forma
     {"sin_resultados": bool, "peliculas": [ {...}, ... ]}.
     """
     peliculas = consultar_peliculas(
