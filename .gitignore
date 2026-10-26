@@ -6,3 +6,4 @@ cine.db
 .cache
 MEMORY.md
 *.log
+test_graph.py
