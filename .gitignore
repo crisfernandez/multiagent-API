@@ -7,3 +7,8 @@ cine.db
 MEMORY.md
 *.log
 test_graph.py
+.pytest_cache/
+.coverage
+htmlcov/
+report.html
+assets/

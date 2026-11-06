@@ -139,8 +139,22 @@ API_Grafos/
 │   │   ├── state.py        # Estado compartido + modelos estructurados del LLM
 │   │   └── tools.py        # Tool del LLM + consultas a la BD + heurísticas
 │   └── static/             # Frontend (HTML/CSS/JS vanilla, sin build)
-├── test_graph.py           # Prueba manual del grafo
+├── tests/
+│   ├── conftest.py         # BD en memoria, FakeLLM y fixtures compartidas
+│   ├── unit/
+│   │   ├── test_router.py     # Router y bifurcaciones condicionales
+│   │   ├── test_search.py     # Búsqueda, serialización y heurísticas del catálogo
+│   │   ├── test_mood.py       # Nodos de mood, redacción y aclaración
+│   │   ├── test_fallbacks.py  # Extracción de resultados y fallbacks deterministas
+│   │   ├── test_api.py        # Endpoints, paginación y caché de la API
+│   │   ├── test_cache.py      # TTL, desalojo y sobrescritura
+│   │   └── test_tmdb.py       # Ficha en vivo de TMDB con HTTP simulado
+│   └── integration/
+│       └── test_graph.py      # Grafo compilado real con los cuatro LLM falsos
+├── test_graph.py           # Prueba manual del grafo (requiere Ollama)
+├── pytest.ini              # Configuración de pytest y marker `integration`
 ├── requirements.txt
+├── requirements-dev.txt    # pytest + pytest-cov + httpx
 └── .env.example
 ```
 
@@ -175,6 +189,57 @@ Prueba manual del grafo sin API (imprime la intención detectada y la respuesta 
 ```bash
 python test_graph.py
 ```
+
+---
+
+## Tests automatizados
+
+La suite valida el motor **sin Ollama, sin TMDB, sin red y sin tocar `cine.db`**. Los LLM se sustituyen por dobles y la base de datos por un SQLite en memoria: los tests son rápidos, deterministas y se pueden ejecutar en segundos.
+
+```bash
+# 1. Dependencias de desarrollo
+pip install -r requirements-dev.txt
+
+# 2. Suite completa
+py -m pytest
+# Linux/macOS: python -m pytest
+
+# 3. Suite + cobertura
+py -m pytest --cov=app --cov-report=term-missing
+```
+
+Estado actual: **129 tests, 0 fallos y 100 % de cobertura** de los módulos medidos (`api.py`, `cache.py`, `config.py`, `database.py`, `tmdb.py`, `agent.py`, `state.py`, `tools.py`).
+
+`pytest.ini` fija `testpaths=tests`, añade la raíz al `pythonpath` (para importar `app.*` sin instalar el paquete) y declara el marker `integration`.
+
+### Cómo se consigue el aislamiento
+
+| Pieza | Papel |
+|---|---|
+| `FakeLLM` | Doble de los LLM con respuestas en cola o mediante función; permite ejecutar el grafo sin Ollama. |
+| `fabrica_sesiones` | Crea un SQLite en memoria con `StaticPool` y siembra 9 películas que cubren acentos, géneros múltiples, actor compartido, keywords en inglés y campos nulos. |
+| `aislar_entorno` (autouse) | Parchea `tools.SessionLocal`, vacía las cachés de catálogo y restaura el entorno tras cada test. |
+| `fakes` | Instala dobles en `llm_router`, `llm_psicologo`, `llm_agente` y `llm`. |
+| `client` | `TestClient` con instancias nuevas de `CacheTTL`, de modo que la caché de un test no contamina el siguiente. |
+
+### Mapa de tests
+
+| Archivo | Qué cubre |
+|---|---|
+| `tests/unit/test_router.py` | Clasificación de intención y elección de la siguiente arista. |
+| `tests/unit/test_search.py` | Helpers de normalización, `pelicula_a_dict`, contrato JSON de `buscar_peliculas`, OR del mood, exclusión de ids, respaldo sin tildes y catálogo vacío. |
+| `tests/unit/test_mood.py` | Limpieza y límites del análisis emocional, prompts del redactor y mensaje de aclaración. |
+| `tests/unit/test_fallbacks.py` | `extraer_resultados` (JSON, dict e inválidos) y construcción de los `tool_calls` de `reintentar_catalogo` y `respaldo_mood`. |
+| `tests/unit/test_api.py` | `/health`, paginación a 10, `excluir_ids`, caché por `(thread_id, mensaje)`, ficha TMDB, códigos 404/502 y estáticos. |
+| `tests/unit/test_cache.py` | TTL exacto, caducidad, desalojo del más antiguo y sobrescritura, con reloj falso. |
+| `tests/unit/test_tmdb.py` | Cabeceras, limpieza de plataformas, ficha completa, 404, fallos parciales, año y póster nulo, con `requests.get` simulado. |
+| `tests/integration/test_graph.py` | Grafo compilado real (aristas, `ToolNode`, `MemorySaver`) con los cuatro LLM falsos: mood, actor, título recuperado por fallback, respaldo y aclaración. |
+
+### Qué queda fuera
+
+- `app/core/ingestion.py`: es un proceso de poblado contra TMDB y queda diferido.
+- LLM real, TMDB real, latencia y concurrencia: se validan a mano con `test_graph.py` y la app en marcha.
+- Frontend (`app/static/*.js`): sin tests automáticos.
 
 ---
 

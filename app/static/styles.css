@@ -247,23 +247,6 @@ button:active { transform: translateY(1px) scale(0.99); }
   padding: 40px 10px;
 }
 
-/* ----- Narración del agente redactor ----- */
-.narracion {
-  max-width: 860px;
-  margin: 0 auto 22px;
-  padding: 14px 18px;
-  font-family: "VT323", monospace;
-  font-size: 1.2rem;
-  line-height: 1.5;
-  color: var(--text);
-  background: rgba(26, 11, 51, 0.75);
-  border-left: 3px solid var(--neon-pink);
-  border-radius: 0 10px 10px 0;
-  box-shadow: 0 0 14px rgba(255, 45, 149, 0.25);
-}
-
-.narracion[hidden] { display: none; }
-
 /* ----- Modal / tarjeta ampliada ----- */
 .modal {
   position: fixed;
