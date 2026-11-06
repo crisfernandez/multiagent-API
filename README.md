@@ -1,4 +1,4 @@
-# REEL80 · Videoclub Neón
+# REEL80
 
 Recomendador de cine con **sistema multiagente** construido con [LangGraph](https://langchain-ai.github.io/langgraph/), FastAPI y un LLM local (Ollama).
 
