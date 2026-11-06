@@ -8,8 +8,8 @@ from typing_extensions import TypedDict
 
 # 1. El molde del Router (Nodo 1)
 class ClasificacionIntencion(BaseModel):
-    tipo: Literal["actor", "genero", "mood"] = Field(
-        description="Elige 'actor' si pide un intérprete, 'genero' si pide un género cinematográfico formal, o 'mood' si describe emociones, ideas o temas."
+    tipo: Literal["actor", "genero", "mood", "titulo"] = Field(
+        description="Elige 'actor' si pide un intérprete, 'genero' si pide un género cinematográfico formal, 'mood' si describe emociones, ideas o temas, o 'titulo' si busca una película por título."
     )
     entidad: Optional[str] = Field(
         default=None,
@@ -25,6 +25,7 @@ class EstadoRecomendador(TypedDict, total=False):
     termino_busqueda: Optional[str]
     keywords: List[str]  # Lista de temas (en inglés, p/ catálogo TMDB)
     generos_mood: List[str]  # Géneros en español que deduce el psicólogo del mood
+    duracion_max: Optional[int]  # Límite de duración en minutos ("menos de 2 horas" -> 120)
     peliculas: List[dict]  # Pool estructurado que sale del ToolNode y alimenta la API
     ya_reintentado: bool  # Evita bucles infinitos en el reintento del agente buscador
     respaldo_mood: bool  # True si se usó el respaldo "lo mejor valorado"

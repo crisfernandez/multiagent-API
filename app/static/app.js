@@ -6,12 +6,6 @@ const resultsEl = document.getElementById("results");
 
 const modal = document.getElementById("modal");
 const closeBtn = document.getElementById("close-modal");
-const narracionEl = document.getElementById("narracion");
-
-function mostrarNarracion(texto) {
-  narracionEl.textContent = texto || "";
-  narracionEl.hidden = !texto;
-}
 
 const threadId = "web-" + Math.random().toString(36).slice(2, 10);
 const state = {
@@ -26,6 +20,7 @@ function setStatus(texto) {
 function filaMeta(pelicula) {
   const partes = [];
   if (pelicula.anio) partes.push(pelicula.anio);
+  if (pelicula.duracion) partes.push(pelicula.duracion + " min");
   if (pelicula.nota != null) partes.push("★ " + pelicula.nota);
   return partes.join(" · ");
 }
@@ -183,7 +178,6 @@ function cerrarModal() {
 async function pedirPeliculas({ nuevaBusqueda }) {
   setStatus("Buscando en el videoclub...");
   refreshBtn.disabled = true;
-  mostrarNarracion("");
 
   const body = {
     mensaje: state.ultimaBusqueda,
@@ -204,7 +198,6 @@ async function pedirPeliculas({ nuevaBusqueda }) {
     data.peliculas.forEach((p) => state.excluir.push(p.id));
 
     render(data.peliculas);
-    mostrarNarracion(data.respuesta);
     if (data.respaldo_mood && data.peliculas.length) {
       setStatus("No encontré títulos exactos para tu mood; te dejo lo mejor valorado del videoclub");
     } else {

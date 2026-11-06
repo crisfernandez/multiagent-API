@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import Base, PeliculaDB, SessionLocal, engine
+from app.core.tmdb import obtener_duracion_tmdb
 
 GENEROS_TMDB = {
     18: "Drama",
@@ -88,7 +89,12 @@ def obtener_detalles_extra_tmdb(movie_id: int):
 
 def _asegurar_columnas_nuevas() -> None:
     """Añade columnas nuevas a la tabla existente sin borrar los datos."""
-    columnas = [("director", "VARCHAR"), ("anio", "INTEGER"), ("plataformas", "VARCHAR")]
+    columnas = [
+        ("director", "VARCHAR"),
+        ("anio", "INTEGER"),
+        ("plataformas", "VARCHAR"),
+        ("duracion", "INTEGER"),
+    ]
     with engine.connect() as conn:
         existentes = {fila[1] for fila in conn.exec_driver_sql("PRAGMA table_info(peliculas)")}
         for nombre, tipo in columnas:
@@ -117,6 +123,24 @@ def backfill_detalles() -> None:
             if i % 25 == 0:
                 db.commit()
                 print(f"  {i}/{len(peliculas)} actualizadas...")
+        db.commit()
+    finally:
+        db.close()
+
+
+def backfill_duraciones() -> None:
+    """Rellena la duración (minutos) de las filas antiguas que no la tienen."""
+    db: Session = SessionLocal()
+    try:
+        peliculas = db.query(PeliculaDB).filter(PeliculaDB.duracion.is_(None)).all()
+        print(f"Duraciones a completar: {len(peliculas)}")
+        for i, p in enumerate(peliculas, start=1):
+            duracion = obtener_duracion_tmdb(p.tmdb_id)
+            if duracion:
+                p.duracion = int(duracion)
+            if i % 25 == 0:
+                db.commit()
+                print(f"  {i}/{len(peliculas)} duraciones actualizadas...")
         db.commit()
     finally:
         db.close()
@@ -215,6 +239,7 @@ def poblar_base_datos(total_paginas: int = 25) -> None:
 
                     fecha = p.get("release_date") or ""
                     anio = int(fecha[:4]) if fecha[:4].isdigit() else None
+                    duracion = obtener_duracion_tmdb(tmdb_id)
 
                     pelicula_db = PeliculaDB(
                         tmdb_id=tmdb_id,
@@ -228,6 +253,7 @@ def poblar_base_datos(total_paginas: int = 25) -> None:
                         director=director,
                         anio=anio,
                         plataformas=plataformas,
+                        duracion=duracion,
                     )
                     db.add(pelicula_db)
                     contador += 1
@@ -251,3 +277,5 @@ if __name__ == "__main__":
     backfill_detalles()
     print("Completando años de estreno...")
     completar_anios()
+    print("Completando duraciones...")
+    backfill_duraciones()

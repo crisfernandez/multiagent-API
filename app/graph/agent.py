@@ -9,7 +9,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from app.graph.state import AnalisisEmocional, ClasificacionIntencion, EstadoRecomendador
-from app.graph.tools import SIN_RESULTADOS, buscar_peliculas, detectar_termino_catalogo
+from app.graph.tools import (
+    SIN_RESULTADOS,
+    buscar_peliculas,
+    detectar_termino_catalogo,
+    parsear_duracion_max,
+)
 
 LIMITE_POOL = 60  # candidatos que deja la tool para paginar/refrescar sin repetir el LLM
 
@@ -38,6 +43,7 @@ def nodo_router(state: EstadoRecomendador) -> dict:
     return {
         "tipo_intencion": clasificacion.tipo,
         "termino_busqueda": entidad,
+        "duracion_max": parsear_duracion_max(mensaje),
         "keywords": [],
         "generos_mood": [],
         "mood_detectado": None,
@@ -81,7 +87,8 @@ def nodo_agente(state: EstadoRecomendador) -> dict:
         f"entidad={state.get('termino_busqueda')}, "
         f"mood={state.get('mood_detectado')}, "
         f"generos={state.get('generos_mood') or []}, "
-        f"keywords={state.get('keywords') or []}."
+        f"keywords={state.get('keywords') or []}, "
+        f"duracion_max={state.get('duracion_max')}."
     )
     system = SystemMessage(
         content=f"""
@@ -93,6 +100,7 @@ def nodo_agente(state: EstadoRecomendador) -> dict:
       reparto, plataformas), usa la herramienta buscar_peliculas pasándole los
       criterios que hayas deducido (actor, genero/generos, titulo o keywords).
       Si el estado de ánimo está descrito, usa generos + keywords.
+      Si hay duracion_max, pásala también para respetar el límite de minutos.
     - Si el mensaje no requiere consultar el catálogo (saludos, dudas generales,
       petición de aclaración), responde directamente sin usar la herramienta y
       hazlo EN UNA frase breve: tu texto no se muestra al usuario, la respuesta
@@ -132,6 +140,16 @@ def nodo_extraer_resultados(state: EstadoRecomendador) -> dict:
     elif isinstance(contenido, dict):
         peliculas = contenido.get("peliculas") or []
 
+    duracion_max = state.get("duracion_max")
+    if duracion_max is not None:
+        peliculas = [
+            p
+            for p in peliculas
+            if isinstance(p, dict)
+            and p.get("duracion") is not None
+            and p["duracion"] <= duracion_max
+        ]
+
     return {"peliculas": peliculas}
 
 
@@ -154,6 +172,8 @@ def nodo_reintentar_catalogo(state: EstadoRecomendador) -> dict:
         args["genero"] = termino
     elif tipo == "titulo" and termino:
         args["titulo"] = termino
+    if state.get("duracion_max") is not None:
+        args["duracion_max"] = state["duracion_max"]
 
     return {
         "ya_reintentado": True,
@@ -177,6 +197,9 @@ def nodo_reintentar_catalogo(state: EstadoRecomendador) -> dict:
 # NODO 7: Respaldo del mood — vuelve a pedir a la tool sin filtros
 # (lo mejor valorado) para no dejar la pantalla vacía.
 def nodo_respaldo_mood(state: EstadoRecomendador) -> dict:
+    args: dict = {"limite": LIMITE_POOL}
+    if state.get("duracion_max") is not None:
+        args["duracion_max"] = state["duracion_max"]
     return {
         "ya_reintentado": True,
         "respaldo_mood": True,
@@ -186,7 +209,7 @@ def nodo_respaldo_mood(state: EstadoRecomendador) -> dict:
                 tool_calls=[
                     {
                         "name": buscar_peliculas.name,
-                        "args": {"limite": LIMITE_POOL},
+                        "args": args,
                         "id": f"respaldo-{uuid.uuid4().hex[:8]}",
                     }
                 ],
@@ -225,7 +248,7 @@ def bifurcar_segun_intencion(state: EstadoRecomendador) -> str:
     # Si es mood, pasa primero por el psicólogo. Si no, va directo al agente.
     if tipo == "mood":
         return "analizar_mood"
-    if tipo in ("actor", "genero"):
+    if tipo in ("actor", "genero", "titulo"):
         # Un título concreto puede venir clasificado como actor/género: la tool
         # y el reintento se encargan de encontrarlo por título.
         return "agente"

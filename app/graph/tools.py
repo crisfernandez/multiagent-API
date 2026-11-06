@@ -1,4 +1,5 @@
 import json
+import re
 from typing import List, Optional
 import unicodedata
 
@@ -81,6 +82,39 @@ def _mapear_generos(generos: Optional[List[str]]) -> Optional[List[str]]:
     return mapeados or None
 
 
+def parsear_duracion_max(mensaje: Optional[str]) -> Optional[int]:
+    """Extrae un límite de duración en minutos de frases como 'menos de 2 horas'."""
+    if not mensaje:
+        return None
+    texto = _normalizar(mensaje)
+
+    # "1 hora y media" / "hora y media" -> 90 minutos.
+    media = re.search(r"(\d+(?:[.,]\d+)?)?\s*horas?\s+y\s+media", texto)
+    if media:
+        horas = float(media.group(1).replace(",", ".")) if media.group(1) else 1
+        return int(round(horas * 60 + 30))
+
+    # "2 horas 15 minutos" y "1h 30m".
+    combinada = re.search(
+        r"(\d+(?:[.,]\d+)?)\s*(?:h\b|horas?)\s*(?:y\s*)?(\d+)\s*(?:m\b|min\b|minutos?)",
+        texto,
+    )
+    if combinada:
+        horas = float(combinada.group(1).replace(",", "."))
+        return int(round(horas * 60 + int(combinada.group(2))))
+
+    # "2 horas" / "2h" / "2 hs".
+    horas = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:h\b|horas?\b|hs\b)", texto)
+    if horas:
+        return int(round(float(horas.group(1).replace(",", ".")) * 60))
+
+    # "120 minutos" / "90 min" / "30m".
+    minutos = re.search(r"(\d+)\s*(?:min\b|minutos?\b|m\b)", texto)
+    if minutos:
+        return int(minutos.group(1))
+    return None
+
+
 def _listar(texto: Optional[str]) -> List[str]:
     """Convierte 'Drama, Acción' en ['Drama', 'Acción']."""
     if not texto:
@@ -99,6 +133,13 @@ def _plataformas_limpias(texto: Optional[str]) -> List[str]:
     return vistas
 
 
+def _cumple_duracion(pelicula: PeliculaDB, duracion_max: Optional[int]) -> bool:
+    """True si la película respeta el límite; sin dato de duración no cumple."""
+    if duracion_max is None:
+        return True
+    return pelicula.duracion is not None and pelicula.duracion <= duracion_max
+
+
 def pelicula_a_dict(pelicula: PeliculaDB) -> dict:
     """Convierte un registro de la BD en el JSON que consume el frontend."""
     cartel = f"{TMDB_IMAGE_BASE_URL}{pelicula.poster_path}" if pelicula.poster_path else None
@@ -111,6 +152,7 @@ def pelicula_a_dict(pelicula: PeliculaDB) -> dict:
         "director": pelicula.director,
         "anio": pelicula.anio,
         "sinopsis": pelicula.sinopsis,
+        "duracion": pelicula.duracion,
         "generos": _listar(pelicula.generos),
         "reparto": _listar(pelicula.actores),
         "plataformas": _plataformas_limpias(pelicula.plataformas),
@@ -124,6 +166,7 @@ def buscar_peliculas(
     generos: Optional[List[str]] = None,
     titulo: Optional[str] = None,
     keywords: Optional[List[str]] = None,
+    duracion_max: Optional[int] = None,
     limite: int = 60,
 ) -> str:
     """
@@ -139,6 +182,7 @@ def buscar_peliculas(
     - generos: lista de géneros en español para estados de ánimo (ej: ["Drama", "Thriller"]).
     - titulo: título concreto (ej: "Origen").
     - keywords: palabras clave en inglés del catálogo (ej: ["friendship", "revenge"]).
+    - duracion_max: duración máxima en minutos (ej: 120 para "menos de 2 horas").
     - limite: nº máximo de películas a devolver (usa 60 para dejar margen de paginación).
 
     Devuelve un JSON con la forma
@@ -150,6 +194,7 @@ def buscar_peliculas(
         generos=generos,
         titulo=titulo,
         keywords=keywords,
+        duracion_max=duracion_max,
         limite=limite,
     )
     return json.dumps(
@@ -167,6 +212,7 @@ def consultar_peliculas(
     generos: Optional[List[str]] = None,
     titulo: Optional[str] = None,
     keywords: Optional[List[str]] = None,
+    duracion_max: Optional[int] = None,
     limite: int = 10,
     excluir_ids: Optional[List[int]] = None,
 ) -> List[PeliculaDB]:
@@ -226,6 +272,12 @@ def consultar_peliculas(
         if condiciones_o:
             query = query.filter(or_(*condiciones_o))
 
+        if duracion_max is not None:
+            query = query.filter(
+                PeliculaDB.duracion.isnot(None),
+                PeliculaDB.duracion <= duracion_max,
+            )
+
         if excluir_ids:
             query = query.filter(~PeliculaDB.id.in_(excluir_ids))
 
@@ -243,7 +295,7 @@ def consultar_peliculas(
         if termino:
             tokens = [_normalizar(t) for t in _tokens(termino)]
             for p in db.query(PeliculaDB).all():
-                if p.id in excluidos:
+                if p.id in excluidos or not _cumple_duracion(p, duracion_max):
                     continue
                 heno = _normalizar(f"{p.titulo} {p.generos} {p.actores}")
                 if all(t in heno for t in tokens):
@@ -252,7 +304,7 @@ def consultar_peliculas(
             # Mood: basta con que la película tenga ALGÚN género de la lista.
             generos_norm = [_normalizar(g) for g in generos]
             for p in db.query(PeliculaDB).all():
-                if p.id in excluidos:
+                if p.id in excluidos or not _cumple_duracion(p, duracion_max):
                     continue
                 heno = _normalizar(p.generos)
                 if any(g and g in heno for g in generos_norm):

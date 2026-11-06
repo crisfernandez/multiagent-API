@@ -27,6 +27,23 @@ def _plataformas(region: dict) -> list:
     return limpias
 
 
+def obtener_duracion_tmdb(tmdb_id: int) -> int | None:
+    """Devuelve la duración en minutos o None si TMDB no la ofrece/falla."""
+    base_url = settings.TMDB_BASE_URL.rstrip("/")
+    try:
+        res = requests.get(
+            f"{base_url}/movie/{tmdb_id}",
+            headers=_headers(),
+            params={"language": "es-ES"},
+            timeout=15,
+        )
+    except requests.RequestException:
+        return None
+    if res.status_code != 200:
+        return None
+    return res.json().get("runtime")
+
+
 def obtener_ficha(tmdb_id: int) -> dict:
     """Consulta TMDB en vivo y devuelve una ficha unificada en español.
 

@@ -19,6 +19,7 @@ class PeliculaDB(Base):
     tmdb_id = Column(Integer, unique=True, index=True)
     titulo = Column(String(255), index=True)
     sinopsis = Column(Text)
+    duracion = Column(Integer, nullable=True)  # Duración en minutos
     generos = Column(String(255), index=True)  # Ej: "Drama, Ciencia ficción"
     actores = Column(String(500), index=True)  # Ej: "Leonardo DiCaprio, ..."
     keywords = Column(Text)  # Palabras clave de TMDB
